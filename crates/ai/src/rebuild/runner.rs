@@ -76,6 +76,14 @@ pub struct RunnerOptions {
     /// reaches this runner and no later one.
     #[serde(default)]
     pub start_token: Option<String>,
+    /// Waiting notes already included in `message` ([`RunOptions::carried_notes`]), so the runner
+    /// doesn't hand them to the builder a second time.
+    #[serde(default)]
+    pub carried_notes: Vec<super::notes::Carried>,
+    /// When the person made the request ([`RunOptions::asked`]); `None` (an older app's options)
+    /// is taken as when the runner starts.
+    #[serde(default)]
+    pub asked: Option<std::time::SystemTime>,
 }
 
 impl RunnerOptions {
@@ -93,6 +101,8 @@ impl RunnerOptions {
             beginner: opts.beginner,
             deep,
             start_token: opts.start_token.clone(),
+            carried_notes: opts.carried_notes.clone(),
+            asked: Some(opts.asked),
         }
     }
 
@@ -114,6 +124,8 @@ impl RunnerOptions {
             clean_room: Some(!self.deep),
             when_unwatched: None,
             start_token: self.start_token,
+            carried_notes: self.carried_notes,
+            asked: self.asked.unwrap_or_else(std::time::SystemTime::now),
         }
     }
 
@@ -256,10 +268,9 @@ pub fn starter(cli: PathBuf, staging: PathBuf) -> Starter {
 }
 
 /// A [`super::RunSet`] of at most `limit` builds at once, each in a runner process of its own
-/// ([`starter`]). Each runner has its own session, so a build on an API backend doesn't have to
-/// work alone as it does in the app's session.
+/// ([`starter`]).
 pub fn run_set(limit: usize, cli: PathBuf, staging: PathBuf) -> super::RunSet {
-    super::RunSet::new(limit).with_starter(starter(cli, staging)).with_own_sessions()
+    super::RunSet::new(limit).with_starter(starter(cli, staging))
 }
 
 /// Start a build of `ws` in a runner process and follow it, returning at once (the app calls it
@@ -509,6 +520,11 @@ mod tests {
             good_enough: 85.5,
             beginner: false,
             start_token: Some("this-start".into()),
+            carried_notes: vec![super::super::notes::Carried {
+                id: 7,
+                note: super::super::notes::Left { text: "and green".into(), shown: "and green".into(), pictures: Vec::new(), added: Some(UNIX_EPOCH) },
+            }],
+            asked: UNIX_EPOCH + Duration::from_secs(5),
             ..RunOptions::default()
         };
         RunnerOptions::new(&opts, true)
@@ -527,6 +543,8 @@ mod tests {
         assert_eq!((run.max_rounds, run.good_enough), (3, 85.5));
         assert_eq!(run.clean_room, Some(false), "Deep mode is carried as the run's mode");
         assert_eq!(run.start_token.as_deref(), Some("this-start"), "and the start it was asked for");
+        assert_eq!(run.carried_notes.iter().map(|c| c.id).collect::<Vec<_>>(), [7], "the notes its message already carries");
+        assert_eq!(run.asked, UNIX_EPOCH + Duration::from_secs(5), "and when the person asked");
         assert!(run.when_unwatched.is_none(), "the runner sets what it does with nobody watching");
         let clean = RunnerOptions::new(&RunOptions::default(), false).into_run_options(KindRegistry::built_in(), AgentAdapters::default(), Wake::default());
         assert_eq!(clean.clean_room, Some(true));

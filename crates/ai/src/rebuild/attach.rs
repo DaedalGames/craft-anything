@@ -364,7 +364,7 @@ impl Control {
         notes.retain(|n| !gone.contains(&n.id));
         for w in new {
             self.adopted.insert(w.id);
-            notes.push(Note { id: w.id, text: w.left.text, shown: w.left.shown, pictures: w.left.pictures, questions: w.questions });
+            notes.push(waiting_note(w));
         }
     }
 }
@@ -725,10 +725,7 @@ impl Tail {
 
     /// The notes waiting in the project's folder, whoever added them.
     fn refresh_notes(&self) -> bool {
-        let waiting: Vec<Note> = notes::waiting(&notes::notes_dir(&self.parts.root.join("inbox")))
-            .into_iter()
-            .map(|w| Note { id: w.id, text: w.left.text, shown: w.left.shown, pictures: w.left.pictures, questions: w.questions })
-            .collect();
+        let waiting: Vec<Note> = notes::waiting(&notes::notes_dir(&self.parts.root.join("inbox"))).into_iter().map(waiting_note).collect();
         let mut notes = self.parts.notes.lock().unwrap_or_else(PoisonError::into_inner);
         if *notes == waiting {
             return false;
@@ -821,6 +818,20 @@ pub(super) fn starting<H: Send + 'static>(
         })
         .map_err(|e| ToolError::internal(e.to_string()))?;
     Ok(parts.run(rx, stop, clean_room, Instant::now()))
+}
+
+/// A note waiting in the project's folder, as the run's own list holds it. A note from a version
+/// that kept no time counts as added long ago, the same every time it's read, so the list doesn't
+/// look changed at each look, and a stop of Ghidra since holds.
+fn waiting_note(w: notes::Waiting) -> Note {
+    Note {
+        id: w.id,
+        text: w.left.text,
+        shown: w.left.shown,
+        pictures: w.left.pictures,
+        questions: w.questions,
+        added: w.left.added.unwrap_or(std::time::UNIX_EPOCH),
+    }
 }
 
 /// A follower asks the run to pause ([`Remote::ask_to_stop`]).
